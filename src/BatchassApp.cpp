@@ -33,8 +33,7 @@ public:
 	void keyUp(KeyEvent event) override;
 	void fileDrop(FileDropEvent event) override;
 	void update() override;
-	void drawMain();
-	void drawRender();
+	void draw() override;
 	void cleanup() override;
 	void setUIVisibility(bool visible);
 private:
@@ -63,13 +62,7 @@ private:
 	string							mError;
 	// fbo
 	bool							mIsShutDown;
-	// render
-	WindowRef					mMainWindow;
-	void						createRenderWindow();
-	void						deleteRenderWindows();
-	vector<WindowRef>			allRenderWindows;
-	WindowRef					mRenderWindow;
-	bool						isWindowReady;
+
 
 	Anim<float>						mRenderWindowTimer;
 	void							positionRenderWindow();
@@ -111,51 +104,19 @@ BatchassApp::BatchassApp()
 	tHeight = mVDSettings->mFboHeight / 2;
 	mRenderWindowTimer = 0.0f;
 	//timeline().apply(&mRenderWindowTimer, 1.0f, 2.0f).finishFn([&] { positionRenderWindow(); });
-	isWindowReady = false;
-	mMainWindow = getWindow();
-	mMainWindow->getSignalDraw().connect(std::bind(&BatchassApp::drawMain, this));
-	mMainWindow->getSignalResize().connect(std::bind(&BatchassApp::resizeWindow, this));
 }
 void BatchassApp::resizeWindow()
 {
 	mVDUI->resize();
 }
-void BatchassApp::createRenderWindow()
-{
-	isWindowReady = false;
-	mVDUI->resize();
 
-	deleteRenderWindows();
-	mVDSession->getWindowsResolution();
-
-	//CI_LOG_V("createRenderWindow, resolution:" + toString(mVDSettings->mRenderWidth) + "x" + toString(mVDSettings->mRenderHeight));
-
-	string windowName = "render";
-	mRenderWindow = createWindow(Window::Format().size(mVDSettings->mRenderWidth, mVDSettings->mRenderHeight));
-
-	// create instance of the window and store in vector
-	allRenderWindows.push_back(mRenderWindow);
-
-	mRenderWindow->setBorderless();
-	mRenderWindow->getSignalDraw().connect(std::bind(&BatchassApp::drawRender, this));
-	mVDSettings->mRenderPosXY = ivec2(mVDSettings->mRenderX, mVDSettings->mRenderY);
-	mRenderWindow->setPos(50, 50);
-	mRenderWindowTimer = 0.0f;
-	timeline().apply(&mRenderWindowTimer, 1.0f, 2.0f).finishFn([&] { positionRenderWindow(); });
-}
 void BatchassApp::positionRenderWindow() {
 	mVDSettings->mRenderPosXY = ivec2(mVDSettings->mRenderX, mVDSettings->mRenderY);//20141214 was 0
 	setWindowPos(mVDSettings->mRenderX, mVDSettings->mRenderY);
 	setWindowSize(mVDSettings->mRenderWidth, mVDSettings->mRenderHeight);
-	isWindowReady = true;
+
 }
-void BatchassApp::deleteRenderWindows()
-{
-#if defined( CINDER_MSW )
-	for (auto wRef : allRenderWindows) DestroyWindow((HWND)mRenderWindow->getNative());
-#endif
-	allRenderWindows.clear();
-}
+
 void BatchassApp::setUIVisibility(bool visible)
 {
 	if (visible)
@@ -234,15 +195,7 @@ void BatchassApp::keyDown(KeyEvent event)
 	}
 	if (!mVDSession->handleKeyDown(event)) {
 		switch (event.getCode()) {
-		case KeyEvent::KEY_KP_PLUS:
-		// imgui flickers with case KeyEvent::KEY_TAB: then ² (39)
-		case 39: 
-			createRenderWindow();
-			break;
-		case KeyEvent::KEY_KP_MINUS:
-		case KeyEvent::KEY_BACKSPACE:
-			deleteRenderWindows();
-			break;
+		
 		case KeyEvent::KEY_h:
 			// mouse cursor and ui visibility
 			mVDSettings->mCursorVisible = !mVDSettings->mCursorVisible;
@@ -266,26 +219,8 @@ void BatchassApp::keyUp(KeyEvent event)
 		}
 	}
 }
-void BatchassApp::drawRender()
-{
-	gl::clear(Color::black());
-	if (mFadeInDelay) {
-		mVDSettings->iAlpha = 0.0f;
-		if (getElapsedFrames() > mVDSession->getFadeInDelay()) {
-			mFadeInDelay = false;
-			// warps resize at the end
-			mVDSession->resize();
-			timeline().apply(&mVDSettings->iAlpha, 0.0f, 1.0f, 1.5f, EaseInCubic());
-		}
-	}
-	gl::setMatricesWindow(mVDSettings->mRenderWidth, mVDSettings->mRenderHeight);// , false);
-	if (isWindowReady) {
-		//gl::draw(mVDSession->getRenderTexture(), getWindowBounds());
-		gl::draw(mVDSession->getMixetteTexture(), Area(0, 0, mVDSettings->mRenderWidth, mVDSettings->mRenderHeight));//getWindowBounds()	
-	}
-}
 
-void BatchassApp::drawMain()
+void BatchassApp::draw()
 {
 	gl::clear(Color::black());
 	if (mFadeInDelay) {
@@ -304,37 +239,43 @@ void BatchassApp::drawMain()
 	//gl::draw(mVDSession->getMixTexture(), rectangle);
 	//gl::drawString("xRight: " + std::to_string(mVDSettings->myRight), vec2(toPixels(400), toPixels(300)), Color(1, 1, 1), Font("Verdana", toPixels(24)));
 	// 20190215 gl::setMatricesWindow(mVDSettings->mMainWindowWidth, mVDSettings->mMainWindowHeight, false);
-	gl::draw(mVDSession->getMixTexture(), getWindowBounds());
+	if (mVDSettings->mCursorVisible) {
+		gl::draw(mVDSession->getMixetteTexture(), Rectf(0, 0, tWidth, tHeight));
+		gl::drawString("Mixette", vec2(toPixels(xLeft), toPixels(tHeight)), Color(1, 1, 1), Font("Verdana", toPixels(16)));
+		// flipH MODE_IMAGE = 1
+		gl::draw(mVDSession->getRenderTexture(), Rectf(tWidth * 2 + margin, 0, tWidth + margin, tHeight));
+		gl::drawString("Render", vec2(toPixels(xLeft + tWidth + margin), toPixels(tHeight)), Color(1, 1, 1), Font("Verdana", toPixels(16)));
+		// flipV MODE_MIX = 0
+		gl::draw(mVDSession->getMixTexture(), Rectf(0, tHeight * 2 + margin, tWidth, tHeight + margin));
+		gl::drawString("Mix", vec2(toPixels(xLeft), toPixels(tHeight * 2 + margin)), Color(1, 1, 1), Font("Verdana", toPixels(16)));
+		// show the FBO color texture 
+		gl::draw(mVDSession->getHydraTexture(), Rectf(tWidth + margin, tHeight + margin, tWidth * 2 + margin, tHeight * 2 + margin));
+		gl::drawString("Hydra", vec2(toPixels(xLeft + tWidth + margin), toPixels(tHeight * 2 + margin)), Color(1, 1, 1), Font("Verdana", toPixels(16)));
+
+
+		gl::drawString("irx: " + std::to_string(mVDSession->getFloatUniformValueByName("iResolutionX"))
+			+ " iry: " + std::to_string(mVDSession->getFloatUniformValueByName("iResolutionY"))
+			+ " fw: " + std::to_string(mVDSettings->mFboWidth)
+			+ " fh: " + std::to_string(mVDSettings->mFboHeight),
+			vec2(xLeft, getWindowHeight() - toPixels(30)), Color(1, 1, 1),
+			Font("Verdana", toPixels(24)));
+
+
+		mVDUI->Run("UI", (int)getAverageFps());
+		if (mVDUI->isReady()) {
+		}
+	}
+	else {
+		gl::draw(mVDSession->getMixTexture(), getWindowBounds());
+
+	}
 
 
 	// Spout Send
 	mSpoutOut.sendViewport();
 
-	gl::draw(mVDSession->getMixetteTexture(), Rectf(0, 0, tWidth, tHeight));
-	gl::drawString("Mixette", vec2(toPixels(xLeft), toPixels(tHeight)), Color(1, 1, 1), Font("Verdana", toPixels(16)));
-	// flipH MODE_IMAGE = 1
-	gl::draw(mVDSession->getRenderTexture(), Rectf(tWidth * 2 + margin, 0, tWidth + margin, tHeight));
-	gl::drawString("Render", vec2(toPixels(xLeft + tWidth + margin), toPixels(tHeight)), Color(1, 1, 1), Font("Verdana", toPixels(16)));
-	// flipV MODE_MIX = 0
-	gl::draw(mVDSession->getMixTexture(), Rectf(0, tHeight * 2 + margin, tWidth, tHeight + margin));
-	gl::drawString("Mix", vec2(toPixels(xLeft), toPixels(tHeight * 2 + margin)), Color(1, 1, 1), Font("Verdana", toPixels(16)));
-	// show the FBO color texture 
-	gl::draw(mVDSession->getHydraTexture(), Rectf(tWidth + margin, tHeight + margin, tWidth * 2 + margin, tHeight * 2 + margin));
-	gl::drawString("Hydra", vec2(toPixels(xLeft + tWidth + margin), toPixels(tHeight * 2 + margin)), Color(1, 1, 1), Font("Verdana", toPixels(16)));
-
-
-	gl::drawString("irx: " + std::to_string(mVDSession->getFloatUniformValueByName("iResolutionX"))
-		+ " iry: " + std::to_string(mVDSession->getFloatUniformValueByName("iResolutionY"))
-		+ " fw: " + std::to_string(mVDSettings->mFboWidth)
-		+ " fh: " + std::to_string(mVDSettings->mFboHeight),
-		vec2(xLeft, getWindowHeight() - toPixels(30)), Color(1, 1, 1),
-		Font("Verdana", toPixels(24)));
-
-
-	mVDUI->Run("UI", (int)getAverageFps());
-	if (mVDUI->isReady()) {
-	}
-	getWindow()->setTitle(mVDSettings->sFps + " fps VDController");
+	
+	getWindow()->setTitle(mVDSettings->sFps + " fps BatchassViz");
 }
 
 void prepareSettings(App::Settings *settings)
